@@ -1,6 +1,5 @@
 👋 Hi, I'm Iksan Pratama Putra
 
-🎓 Information Systems Graduate from **Telkom University**  
 💻 Full-Stack Developer  
 🚀 Passionate about building scalable, clean, and maintainable systems
 
