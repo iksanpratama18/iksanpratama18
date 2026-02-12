@@ -1,0 +1,135 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: elearning_postgres
+    environment:
+      POSTGRES_DB: elearning_platform
+      POSTGRES_USER: elearning_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-elearning_password}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d
+    networks:
+      - elearning_network
+    restart: unless-stopped
+    command: >
+      postgres
+      -c shared_preload_libraries=pg_stat_statements
+      -c pg_stat_statements.track=all
+      -c max_connections=200
+      -c shared_buffers=256MB
+      -c effective_cache_size=1GB
+      -c work_mem=4MB
+      -c maintenance_work_mem=64MB
+
+  # PgPool-II for Connection Pooling
+  pgpool:
+    image: pgpool/pgpool:4.4
+    container_name: elearning_pgpool
+    environment:
+      PGPOOL_BACKEND_HOSTNAME0: postgres
+      PGPOOL_BACKEND_PORT0: 5432
+      PGPOOL_BACKEND_WEIGHT0: 1
+      PGPOOL_POSTGRES_USERNAME: elearning_user
+      PGPOOL_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-elearning_password}
+      PGPOOL_ADMIN_USERNAME: admin
+      PGPOOL_ADMIN_PASSWORD: ${PGPOOL_ADMIN_PASSWORD:-admin_password}
+      PGPOOL_ENABLE_POOL_HBA: "false"
+      PGPOOL_MAX_POOL: 25
+      PGPOOL_CHILD_LIFE_TIME: 300
+      PGPOOL_CONNECTION_LIFE_TIME: 0
+    ports:
+      - "5433:5432"
+      - "9999:9999"
+    depends_on:
+      - postgres
+    networks:
+      - elearning_network
+    restart: unless-stopped
+
+  # Redis for Caching and Session Management
+  redis:
+    image: redis:7-alpine
+    container_name: elearning_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - elearning_network
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+
+  # Flyway for Database Migrations
+  flyway:
+    image: flyway/flyway:9-alpine
+    container_name: elearning_flyway
+    environment:
+      FLYWAY_URL: jdbc:postgresql://postgres:5432/elearning_platform
+      FLYWAY_USER: elearning_user
+      FLYWAY_PASSWORD: ${POSTGRES_PASSWORD:-elearning_password}
+      FLYWAY_SCHEMAS: public,user_management,course_management,content_management,gamification,assessment,social,analytics
+      FLYWAY_BASELINE_ON_MIGRATE: true
+    volumes:
+      - ./database/migrations:/flyway/sql
+      - ./flyway.conf:/flyway/conf/flyway.conf
+    depends_on:
+      - postgres
+    networks:
+      - elearning_network
+    profiles:
+      - migration
+
+  # Grafana for Monitoring
+  grafana:
+    image: grafana/grafana:10.0.0
+    container_name: elearning_grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin_password}
+      GF_INSTALL_PLUGINS: grafana-piechart-panel
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana:/etc/grafana/provisioning
+    networks:
+      - elearning_network
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+  # Prometheus for Metrics Collection
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: elearning_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    networks:
+      - elearning_network
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  grafana_data:
+    driver: local
+  prometheus_data:
+    driver: local
+
+networks:
+  elearning_network:
+    driver: bridge
+
