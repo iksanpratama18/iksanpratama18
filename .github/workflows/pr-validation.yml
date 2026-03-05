@@ -1,0 +1,145 @@
+name: PR Validation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  pr-checks:
+    name: Pull Request Validation
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Fetch full history for proper diff
+        
+    - name: Get changed files
+      id: changed-files
+      run: |
+        # Get the list of changed files
+        git diff --name-only origin/master..HEAD > changed_files.txt
+        
+        echo "📝 Files changed in this PR:"
+        cat changed_files.txt
+        
+        # Store changed files for use in other steps
+        echo "changed-files<<EOF" >> $GITHUB_OUTPUT
+        cat changed_files.txt >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+        
+    - name: Validate PR title and description
+      env:
+        PR_TITLE: ${{ github.event.pull_request.title }}
+        PR_BODY: ${{ github.event.pull_request.body }}
+      run: |
+        echo "🔍 Validating PR title and description..."
+        echo "Title: $PR_TITLE"
+        
+        # Check if title is not empty
+        if [ -z "$PR_TITLE" ]; then
+          echo "❌ PR title cannot be empty"
+          exit 1
+        fi
+        
+        # Check if title is descriptive (more than 10 characters)
+        if [ ${#PR_TITLE} -lt 10 ]; then
+          echo "❌ PR title should be more descriptive (at least 10 characters)"
+          exit 1
+        fi
+        
+        # Check if description exists
+        if [ -z "$PR_BODY" ]; then
+          echo "⚠️ Consider adding a PR description for better context"
+        fi
+        
+        echo "✅ PR title and description validation passed"
+        
+    - name: Check for breaking changes
+      run: |
+        echo "🔍 Checking for potentially breaking changes..."
+        
+        # Check for deleted files
+        deleted_files=$(git diff --name-only --diff-filter=D origin/master..HEAD)
+        if [ -n "$deleted_files" ]; then
+          echo "⚠️ Files deleted in this PR:"
+          echo "$deleted_files"
+          echo ""
+          echo "Please ensure these deletions are intentional and document any breaking changes."
+        fi
+        
+        # Check for modified core files
+        core_files=("README.md" ".gitignore" "package.json" "docker-compose.yml" "Dockerfile")
+        modified_core_files=""
+        
+        for file in "${core_files[@]}"; do
+          if git diff --name-only origin/master..HEAD | grep -q "^$file$"; then
+            modified_core_files="$modified_core_files $file"
+          fi
+        done
+        
+        if [ -n "$modified_core_files" ]; then
+          echo "⚠️ Core files modified:"
+          echo "$modified_core_files"
+          echo ""
+          echo "Please ensure these changes are reviewed carefully."
+        fi
+        
+        echo "✅ Breaking changes check complete"
+        
+    - name: Validate file sizes
+      run: |
+        echo "📏 Checking file sizes..."
+        
+        # Check for large files in the PR
+        large_files=""
+        while IFS= read -r file; do
+          if [ -f "$file" ]; then
+            size=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file" 2>/dev/null)
+            if [ "$size" -gt 1048576 ]; then  # 1MB in bytes
+              size_mb=$((size / 1048576))
+              large_files="$large_files\n$file (${size_mb}MB)"
+            fi
+          fi
+        done < changed_files.txt
+        
+        if [ -n "$large_files" ]; then
+          echo "⚠️ Large files detected in this PR:"
+          echo -e "$large_files"
+          echo ""
+          echo "Consider using Git LFS for large files or optimizing file sizes."
+        fi
+        
+        echo "✅ File size validation complete"
+        
+    - name: Check commit messages
+      run: |
+        echo "💬 Checking commit messages..."
+        
+        # Get commit messages for this PR
+        git log origin/master..HEAD --pretty=format:"%s" > commit_messages.txt
+        
+        echo "Commit messages in this PR:"
+        cat commit_messages.txt
+        echo ""
+        
+        # Check for commit message quality
+        while IFS= read -r message; do
+          if [ ${#message} -lt 10 ]; then
+            echo "⚠️ Short commit message detected: '$message'"
+            echo "Consider writing more descriptive commit messages."
+          fi
+        done < commit_messages.txt
+        
+        echo "✅ Commit message check complete"
+        
+    - name: Summary
+      run: |
+        echo "📊 PR Validation Summary:"
+        echo "✅ PR title and description validated"
+        echo "✅ Breaking changes checked"
+        echo "✅ File sizes validated"
+        echo "✅ Commit messages reviewed"
+        echo ""
+        echo "🎉 All PR validation checks passed!"
