@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  validate:
+    name: Repository Validation
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Validate README exists
+      run: |
+        if [ ! -f "README.md" ]; then
+          echo "❌ README.md is missing"
+          exit 1
+        fi
+        echo "✅ README.md found"
+        
+    - name: Check README content
+      run: |
+        if [ -s "README.md" ]; then
+          echo "✅ README.md has content"
+        else
+          echo "❌ README.md is empty"
+          exit 1
+        fi
+        
+    - name: Validate file structure
+      run: |
+        echo "📁 Repository structure:"
+        find . -type f -not -path './.git/*' | sort
+        echo ""
+        
+        # Count files
+        file_count=$(find . -type f -not -path './.git/*' | wc -l)
+        echo "📊 Total files: $file_count"
+        
+        if [ $file_count -eq 0 ]; then
+          echo "❌ Repository appears to be empty"
+          exit 1
+        fi
+        
+    - name: Check for common issues
+      run: |
+        echo "🔍 Checking for common issues..."
+        
+        # Check for large files
+        large_files=$(find . -type f -not -path './.git/*' -size +10M)
+        if [ -n "$large_files" ]; then
+          echo "⚠️ Large files found (>10MB):"
+          echo "$large_files"
+        fi
+        
+        # Check for sensitive files
+        sensitive_patterns=(".env" "*.key" "*.pem" "id_rsa" "password" "secret")
+        for pattern in "${sensitive_patterns[@]}"; do
+          found_files=$(find . -name "$pattern" -not -path './.git/*')
+          if [ -n "$found_files" ]; then
+            echo "⚠️ Potentially sensitive files found:"
+            echo "$found_files"
+          fi
+        done
+        
+        echo "✅ Basic validation complete"
+
+  lint-markdown:
+    name: Markdown Linting
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        
+    - name: Install markdownlint
+      run: npm install -g markdownlint-cli
+      
+    - name: Lint Markdown files
+      run: |
+        if find . -name "*.md" -not -path './.git/*' | grep -q .; then
+          echo "🔍 Linting Markdown files..."
+          find . -name "*.md" -not -path './.git/*' -exec markdownlint {} \; || true
+          echo "✅ Markdown linting complete"
+        else
+          echo "ℹ️ No Markdown files found to lint"
+        fi
